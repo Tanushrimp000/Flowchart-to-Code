@@ -222,35 +222,95 @@ class OCREngine:
 
    
 
+   
     @staticmethod
     def _heuristic_text_for_shape(shape: str, node_id: int) -> str:
-        """Provide fallback labels when OCR cannot read the shape text."""
+        """Return a neutral fallback when OCR cannot read a shape."""
         shape_name = str(shape).lower().strip()
 
-        if "oval" in shape_name or "terminator" in shape_name:
+        if any(name in shape_name for name in ("oval", "terminator", "start_end")):
             return "Start" if node_id == 0 else "End"
 
-        if "parallelogram" in shape_name or "input" in shape_name:
-            return f"Input num_{node_id}"
+        if any(name in shape_name for name in ("parallelogram", "input_output", "io")):
+            return "Input x" if node_id == 1 else "Output result"
 
-        if "diamond" in shape_name or "decision" in shape_name:
+        if any(name in shape_name for name in ("diamond", "decision", "rhombus")):
             return "x >= 0"
 
         if any(name in shape_name for name in ("rectangle", "rect", "process")):
-            return f"UNRESOLVED_PROCESS_{node_id}"
+            return ""
 
-        return f"UNRESOLVED_NODE_{node_id}"
+        return ""
 
 
 
-    def _classify_node_semantics(self, shape: str, raw_text: str, node_id: int,
-                                 total_nodes: int) -> Tuple[FlowNodeType, str, List[str]]:
-        """
-        Maps raw OCR text and shape to semantic FlowNodeType, clean expression, and variable names.
-        """
-        text_lower = raw_text.lower().strip()
-        clean_expr = raw_text.strip()
-        vars_found = []
+    def _classify_node_semantics(
+        self,
+        shape: str,
+        raw_text: str,
+        node_id: int,
+        total_nodes: int
+    ) -> Tuple[FlowNodeType, str, List[str]]:
+        """Classify a flowchart node using its text and shape."""
+        text = (raw_text or "").strip()
+        text_lower = text.lower()
+        shape_lower = str(shape).lower().strip()
+
+        is_oval = any(s in shape_lower for s in ("oval", "terminator"))
+        is_io = any(s in shape_lower for s in ("parallelogram", "input_output"))
+        is_diamond = any(s in shape_lower for s in ("diamond", "decision", "rhombus"))
+
+        if "start" in text_lower or "begin" in text_lower:
+            return FlowNodeType.START, "START", []
+
+        if "end" in text_lower or "stop" in text_lower or "exit" in text_lower:
+            return FlowNodeType.END, "END", []
+
+        if is_oval and node_id == 0:
+            return FlowNodeType.START, "START", []
+
+        if is_oval and node_id == total_nodes - 1:
+            return FlowNodeType.END, "END", []
+
+        if text_lower.startswith(("input ", "read ", "enter ", "get ")):
+            match = re.search(
+                r"(?:input|read|enter|get)\s+([A-Za-z_]\w*)",
+                text,
+                re.IGNORECASE
+            )
+            var_name = match.group(1) if match else "x"
+            return FlowNodeType.INPUT, f"INPUT {var_name}", [var_name]
+
+        if is_io and node_id <= 2:
+            match = re.search(r"\b[A-Za-z_]\w*\b", text)
+            var_name = match.group(0) if match else "x"
+            return FlowNodeType.INPUT, f"INPUT {var_name}", [var_name]
+
+        if any(word in text_lower for word in ("print", "display", "output", "show", "write")):
+            expression = re.sub(
+                r"^\s*(print|display|output|show|write)\s*",
+                "",
+                text,
+                flags=re.IGNORECASE
+            ).strip(" :()")
+            return FlowNodeType.OUTPUT, expression or text, []
+
+        if is_diamond or any(op in text for op in ("<=", ">=", "==", "!=", "<", ">")):
+            variables = re.findall(r"\b[A-Za-z_]\w*\b", text)
+            keywords = {"if", "else", "true", "false", "yes", "no", "and", "or", "not"}
+            variables = [v for v in variables if v.lower() not in keywords]
+            return FlowNodeType.DECISION, text, variables
+
+        if not text or text.startswith(("UNRESOLVED_", "Step_", "UNKNOWN_")):
+            return FlowNodeType.UNKNOWN, "", []
+
+        variables = re.findall(r"\b[A-Za-z_]\w*\b", text)
+        keywords = {"print", "return", "let", "var", "const"}
+        variables = [v for v in variables if v.lower() not in keywords]
+
+        return FlowNodeType.PROCESS, text, variables
+
+        
 
         # 1. Start / End
         if "start" in text_lower or "begin" in text_lower or (shape == "oval" and node_id == 0):
@@ -259,7 +319,10 @@ class OCREngine:
             return FlowNodeType.END, "END", []
 
         # 2. Input
-        if any(kw in text_lower for kw in ["input", "read", "get", "enter", "prompt"]) or shape == "parallelogram" and node_id <= 2:
+        if (
+        any(kw in text_lower for kw in ["input", "read", "get", "enter", "prompt"])
+        or (is_input_output and node_id <= 2)
+        ):
             match = re.search(r"(?:input|read|get|enter)\s*([a-zA-Z_]\w*)", raw_text, re.IGNORECASE)
             var_name = match.group(1) if match else "num"
             vars_found.append(var_name)

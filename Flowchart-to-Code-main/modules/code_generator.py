@@ -191,7 +191,7 @@ class DeterministicCodeBuilder:
         ])
 
         # Always return a string, never None.
-        return "\\n".join(lines)
+        return "\n".join(lines)
 
 
 
@@ -216,7 +216,7 @@ class DeterministicCodeBuilder:
 
         declared = set()
 
-        for n in sorted(ir.nodes, key=lambda x: x.id, reverse=False):
+        for n in sorted(ir.nodes, key=lambda x: x.id):
 
             if n.id in branch_targets:
                 continue
@@ -315,7 +315,7 @@ class DeterministicCodeBuilder:
 
         declared = set()
 
-        for n in sorted(ir.nodes, key=lambda x: x.id, reverse=False):
+        for n in sorted(ir.nodes, key=lambda x: x.id):
 
             if n.id in branch_targets:
                 continue
